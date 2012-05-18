@@ -1,0 +1,20 @@
+@charset "UTF-8";
+/*
+ It's beta forever.
+ 
+ (c) 2012-20xx unarist
+*/
+
+h1{
+	font-size: 170%;
+}
+
+h2{
+	font-size: 150%;
+}
+
+address{
+	margin: 2ex 0;
+	font-style: normal;
+	font-size: 90%;
+}

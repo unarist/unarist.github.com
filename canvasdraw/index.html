@@ -1,0 +1,170 @@
+<!DOCTYPE HTML>
+<html lang="ja-JP">
+<head>
+    <title>canvasでベジェなお絵かきツール</title>
+    <meta charset="UTF-8" />
+	<link rel="stylesheet" href="../main.css">
+    <script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+    <script src="jquery.linq.min.js" type="text/javascript"></script>
+    <script>
+        var canvas, canvasPos, ctx, dragObj = null;
+        $(function () {
+            canvas = document.getElementsByTagName("canvas")[0];
+            canvasPos = $(canvas).position();
+            ctx = canvas.getContext("2d");
+            $("#btnAddPath").click(function () {
+                var id = "path" + parseInt((new Date) / 1000);
+                $('<li class="path" id="' + id + '">' + id + '<ul /></li>')
+                .appendTo("#pathes")
+                .click(function () {
+                    $("li.path").removeClass("selected");
+                    $(this).addClass("selected");
+                    redraw();
+                });
+            });
+            $("#btnAddPoint").click(function () {
+                var path = $(".path.selected");
+                var id = path.attr("id") + "_" + parseInt((new Date) / 1000);
+                var label = $('<li>')
+                    .appendTo(path.find("ul"));
+                $('<div class="point" id="' + id + '">')
+                    .appendTo(label)
+                    .css({
+                        left: canvasPos.left + 5,
+                        top: canvasPos.top + 5
+                    })
+                    .mousedown(function (e) {
+                        $(this).css("border-color", "green");
+                        dragObj = this;
+                        offset = $(this).position();
+                        offset.left -= e.screenX;
+                        offset.top -= e.screenY;
+                    });
+                $('<span>5, 5</span>')
+                    .appendTo(label)
+                    .click(function () {
+                        if (confirm("点(" + $(this).text() + ")を削除しますか？"))
+                            $(this).parent().parent().remove();
+                    });
+            });
+            $("body").mousemove(function (e) {
+                if (dragObj != null) {
+                    var left = offset.left + e.screenX;
+                    var top = offset.top + e.screenY;
+                    $(dragObj)
+                        .css({
+                            left: left,
+                            top: top
+                        })
+                        .parent().find("span")
+                        .text((left - canvasPos.left) + ", " + (top - canvasPos.top));
+                    redraw();
+                }
+            })
+            .mouseup(function () {
+                $(dragObj).css("border-color", "gray");
+                dragObj = null;
+            });
+        });
+
+        function redraw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            $(".path").each(function () {
+                var points = $.Enumerable.From($(this).find(".point").toEnumerable()
+                .Select(function (elem) {
+                    var p = $(elem).position();
+                    p.left -= canvasPos.left;
+                    p.top -= canvasPos.top;
+                    return p;
+                }).ToArray());
+
+                ctx.save();
+
+                if ($(this).hasClass("selected") && points.Count() >= 2) {
+                    ctx.save();
+                    ctx.strokeStyle = "gray";
+                    points.SelectMany(function (p, i) {
+                        if (i % 3 == 0) return [p, p];
+                        else return [p];
+                    }).Skip(1)
+                    .BufferWithCount(2)
+                    .ForEach(function (ar) {
+                        if (ar.length < 2) return false;
+                        ctx.beginPath();
+                        ctx.moveTo(ar[0].left, ar[0].top);
+                        ctx.lineTo(ar[1].left, ar[1].top);
+                        ctx.stroke();
+                        return true;
+                    });
+                    ctx.restore();
+
+                    ctx.strokeStyle = "green";
+                }
+
+                ctx.beginPath();
+                points.SkipWhile(function (pos, i) {
+                    if (i > 0) return false;
+                    ctx.moveTo(pos.left, pos.top);
+                    return true;
+                })
+                .BufferWithCount(3)
+                .ForEach(function (ar) {
+                    if (ar.length < 3) return false;
+                    ctx.bezierCurveTo(
+                        ar[0].left, ar[0].top,
+                        ar[1].left, ar[1].top,
+                        ar[2].left, ar[2].top);
+                    return true;
+                });
+                ctx.stroke();
+
+                ctx.restore();
+            });
+        }
+    </script>
+    <style>
+        canvas {
+            border: 1px solid gray;
+        }
+        .path li{
+            display: inline;
+            font-weight: normal;
+        }
+        .path li span:before{
+            content: "(";
+        }
+        .path li span:after{
+            content: "), ";
+        }
+        .selected {
+            font-weight: bold;
+        }
+        .point {
+            position: absolute;
+            width: 0px;
+            height: 0px;
+        }
+        .selected .point {
+            border: 3px solid gray;
+        }
+    </style>
+</head>
+<body>
+    <h1>canvasでベジェなお絵かきツール</h1>
+    <p>某お高いツールには到底敵いませんけどね。</p>
+    <ol>
+        <li><em>パスを追加</em>するとpath**が現れるので、クリックして選択します</li>
+        <li><em>制御点を追加</em>すると四角いアレが現れるので、ドラッグして好きなところに動かしましょう</li>
+        <li>制御点を必要なだけ増やすとベジェ曲線を描画します</li>
+        <li>"(x,y)"をクリックすると点を削除できます</li>
+    </ol>
+    <canvas width="400" height="300"></canvas>
+    <ul id="pathes">
+    </ul>
+    <input type="button" id="btnAddPath" value="パスを追加" />
+    <input type="button" id="btnAddPoint" value="制御点を追加" />
+    <address>
+        Created by <a href="http://twitter.com/unarist">@unarist</a>.
+    </address>
+</body>
+</html>
