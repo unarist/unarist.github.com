@@ -1,0 +1,76 @@
+<head>
+    <title>JSON Filter Tool</title>
+    <style>
+#editor {
+    position: relative;
+    width: 100%;
+    height: 200px;
+}
+#output {
+    width: 100%;
+    height: 400px;
+}
+    </style>
+</head>
+<p>Input: <input id="input" type="file"></p>
+<p>Filter: <code>(input: object) => object</code></p>
+<div id="editor">// vars: input, _ (underscore.js)
+Object.prototype.pipe = function(f) { return f(this); }
+Object.prototype.mapValues = function(f) { return Object.fromEntries(Object.entries(this).map(([k, v]) => [k, f(v)])); }
+Object.prototype.filterValues = function(f) { return Object.fromEntries(Object.entries(this).filter(([k, v]) => f(v))); }
+return input
+</div>
+<p>Error: <span id="error"></span></p>
+<p>Output:</p>
+<textarea id="output"></textarea>
+
+<script src="https://cdn.jsdelivr.net/npm/ace-builds@1.4.6/src-noconflict/ace.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/underscore@1.9.1/underscore.min.js"></script>
+<script>
+    ace.config.set("basePath", "https://cdn.jsdelivr.net/npm/ace-builds@1.4.6/src-noconflict/");
+    const editor = ace.edit("editor");
+    editor.session.setMode("ace/mode/javascript");
+    editor.session.on("change", _.debounce(evaluate, 300));
+    var inputObj = {};
+
+    document.querySelector("#input").addEventListener('change', e => {
+        const inputFile = e.target.files[0];
+        if (!inputFile) {
+            inputObj = {};
+        } else {
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    inputObj = JSON.parse(reader.result);
+                    evaluate();
+                } catch(e) {
+                    alert(e);
+                }
+            };
+            reader.readAsText(inputFile);
+        }
+    });
+    function evaluate() {
+        const filterSrc = editor.getValue();
+        try {
+            const filterFn = new Function("input", filterSrc);
+            const result = filterFn(inputObj);
+            document.querySelector("#output").textContent = JSON.stringify(result, replacer, 2);
+            document.querySelector("#error").textContent = "";
+        } catch (e) {
+            document.querySelector("#error").textContent = e;
+        }
+    }
+    function replacer(key, value) {
+        if (Array.isArray(value) && value.length > 10) {
+            return [
+                ...value.slice(0, 5),
+                `... (${value.length - 10} items)`,
+                ...value.slice(-5)];
+        }
+        return value;
+    }
+    function setOutput(str) {
+        document.querySelector('#output').textContent = str;
+    }
+</script>
