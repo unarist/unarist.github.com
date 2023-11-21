@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Multi-output player</title>
+    <style>
+        .devices { display: flex;}
+    </style>
+</head>
+
+<body>
+    <h1>Play audio file in multiple output devices</h1>
+    File: <input type="file" id="file"><br>
+    <button id="reload">Reload devices (may request access to microphone)</button>
+    <div class="devices">
+        <fieldset>
+            <legend>Output 1 (play/stop in here)</legend>
+            Device: <select id="device1"></select><br>
+            <audio id="audio1" controls></audio>
+        </fieldset>
+        <fieldset>
+            <legend>Output 2</legend>
+            Device: <select id="device2"></select><br>
+            <audio id="audio2" controls></audio>
+        </fieldset>
+    </div>
+    <script>
+        const fileEl = document.getElementById('file');
+        const reloadEl = document.getElementById('reload');
+        const device1El = document.getElementById('device1');
+        const device2El = document.getElementById('device2');
+        const audio1El = document.getElementById('audio1');
+        const audio2El = document.getElementById('audio2');
+
+        reloadEl.onclick = async () => {
+            // デバイスの一覧を取得する前に、getUserMediaでアクセスを許可してもらう必要がある（っぽい）
+            const dummyStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            dummyStream.getTracks().forEach(track => track.stop());
+
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            for (const device of devices) {
+                if (device.kind === 'audiooutput') {
+                    const optionEl = document.createElement('option');
+                    optionEl.value = device.deviceId;
+                    optionEl.text = device.label;
+                    device1El.appendChild(optionEl);
+                    device2El.appendChild(optionEl.cloneNode(true));
+                }
+            }
+        };
+
+        device1El.onchange = e => audio1El.setSinkId(e.target.value);
+        device2El.onchange = e => audio2El.setSinkId(e.target.value);
+
+        const mainAudio = audio1El;
+        const subAudios = [audio2El];
+        const subAudioProxy = new Proxy(subAudios, {
+            set: (target, prop, value) => {
+                target.forEach(audio => audio[prop] = value)
+            },
+            get: (target, prop) => {
+                if (typeof target[0][prop] === 'function') {
+                    return (...args) => {
+                        target.forEach(audio => audio[prop].call(audio, ...args));
+                    }
+                }
+                return target[0][prop];
+            }
+        });
+
+        fileEl.onchange = e => {
+            const file = e.target.files[0];
+            const url = URL.createObjectURL(file);
+            mainAudio.src = url;
+            subAudioProxy.src = url;
+        }
+
+        mainAudio.onplay = () => subAudioProxy.play();
+        mainAudio.onpause = () => subAudioProxy.pause();
+        mainAudio.onseeking = () => subAudioProxy.currentTime = mainAudio.currentTime;
+        mainAudio.onvolumechange = () => subAudioProxy.volume = mainAudio.volume;
+        mainAudio.onratechange = () => subAudioProxy.playbackRate = mainAudio.playbackRate;
+        mainAudio.onended = () => subAudioProxy.pause();
+    </script>
+</body>
+
+</html>
