@@ -6,13 +6,18 @@
     <title>Multi-output player</title>
     <style>
         .devices { display: flex;}
+        #lock-subaudio:checked ~ .devices audio:not(#audio1) {
+            pointer-events: none;
+            filter: opacity(0.5) contrast(0.9);
+        }
     </style>
 </head>
 
 <body>
     <h1>Play audio file in multiple output devices</h1>
     File: <input type="file" id="file"><br>
-    <button id="reload">Reload devices (may request access to microphone)</button>
+    <button id="reload">Reload devices (may request access to microphone)</button><br>
+    <input type="checkbox" id="lock-subaudio" checked><label for="lock-subaudio">Disable mouse interaction on sub outputs</label>
     <div class="devices">
         <fieldset>
             <legend>Output 1 (play/stop in here)</legend>
