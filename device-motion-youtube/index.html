@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>動画を流しながら加速度を記録するやつ</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lodash@4/lodash.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+
+        #youtube-player {
+            max-width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .chart-container {
+            margin-top: 20px;
+        }
+
+        .chart {
+            margin-bottom: 20px;
+        }
+
+        button {
+            margin: 10px;
+            padding: 10px;
+            font-size: 1.2em;
+            -webkit-appearance: none;
+        }
+
+        #chapters-input {
+            width: 300px;
+        }
+
+        #record-info {
+            list-style-type: none;
+            padding: 0;
+            text-align: left;
+            display: inline-block;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+        <input type="text" id="youtube-url" placeholder="YouTubeのURL">
+        <input type="text" id="chapters-input" placeholder="チャプター秒数 (start[,chap2,chap3...],end)">
+        <button onclick="loadVideo()">動画を再読み込み</button>
+    </div>
+
+    <div id="youtube-player"></div>
+
+    <div>
+        <button id="start-recording" disabled>計測開始</button>
+        <button id="stop-recording" disabled>計測終了</button>
+    </div>
+
+    <h2>計測結果</h2>
+    <ul id="record-info"></ul>
+    <div id="charts-container" class="chart-container"></div>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script>
+        let player;
+        let isRecording = false;
+        let accelerationData = { x: [], y: [], z: [], time: [] };
+        let charts = [];
+        let chapters = [];
+        let videoId = '';
+        let wakeLock = null;
+
+        function getUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            return {
+                v: urlParams.get('v'),
+                chapters: urlParams.get('chapters')
+            };
+        }
+
+        function updateUrl() {
+            if (videoId && chapters.length > 0) {
+                const url = new URL(window.location);
+                url.searchParams.set('v', videoId);
+                url.searchParams.set('chapters', chapters.join(','));
+                window.history.replaceState({}, '', url);
+            }
+        }
+
+        function onYouTubeIframeAPIReady() {
+            const params = getUrlParams();
+
+            player = new YT.Player('youtube-player', {
+                width: '640',
+                height: '360',
+                videoId: params.v || '',
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': function (event) {
+                        if (event.data === YT.PlayerState.ENDED) {
+                            stopMotionRecording();
+                        }
+                    }
+                }
+            });
+
+            if (params.v) {
+                document.getElementById('youtube-url').value = "https://youtu.be/" + params.v;
+                videoId = params.v;
+            }
+
+            if (params.chapters) {
+                document.getElementById('chapters-input').value = params.chapters;
+                parseChapters(params.chapters);
+            }
+        }
+
+        function onPlayerReady(event) {
+            document.getElementById('start-recording').disabled = false;
+            document.getElementById('stop-recording').disabled = false;
+
+            videoId = player.getVideoData().video_id;
+        }
+
+        function loadVideo() {
+            const url = document.getElementById('youtube-url').value;
+            const chaptersInput = document.getElementById('chapters-input').value;
+            videoId = extractYouTubeId(url);
+
+            if (videoId) {
+                player.cueVideoById(videoId);
+                parseChapters(chaptersInput);
+                updateUrl();
+            } else {
+                alert('有効なYouTubeのURLを入力してください');
+            }
+        }
+
+        function parseChapters(chaptersInput) {
+            chapters = chaptersInput ? chaptersInput.split(',').map(Number).filter(val => !isNaN(val)) : [];
+        }
+
+        function extractYouTubeId(url) {
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[2].length === 11) ? match[2] : null;
+        }
+
+        async function requestSensorPermission() {
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                const response = await DeviceMotionEvent.requestPermission();
+                if (response === 'granted') {
+                    return true;
+                } else {
+                    alert('センサーデータへのアクセスが拒否されました');
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        async function startMotionRecording() {
+            const permissionGranted = await requestSensorPermission();
+            if (!permissionGranted) return;
+
+            if (!isRecording) {
+                isRecording = true;
+                accelerationData = { x: [], y: [], z: [], time: [] };
+                if (chapters.length === 0) {
+                    chapters = [0, player.getDuration()];
+                }
+
+                window.addEventListener('devicemotion', handleMotion);
+                player.seekTo(0);
+                player.playVideo();
+                wakeLock = await navigator.wakeLock.request('screen').catch(alert);
+            }
+        }
+
+        function stopMotionRecording() {
+            if (isRecording) {
+                isRecording = false;
+                wakeLock?.release(); // Promiseだけど無視
+                wakeLock = null;
+                player.pauseVideo();
+
+                window.removeEventListener('devicemotion', handleMotion);
+                const recordInfo = document.getElementById('record-info');
+                recordInfo.replaceChildren(...[
+                    `動画URL: ${player.getVideoUrl()}`,
+                    `動画名: ${player.getVideoData().title}`,
+                    `計測日時: ${new Intl.DateTimeFormat([], {dateStyle: "medium", timeStyle:"long"}).format(new Date())}`,
+                ].map(text => Object.assign(document.createElement('li'), { textContent: text })));
+                updateCharts();
+            }
+        }
+
+        function handleMotion(event) {
+            if (isRecording) {
+                const { x, y, z } = event.acceleration;
+                const time = player.getCurrentTime();
+
+                if (time < chapters[0] || time > chapters[chapters.length - 1]) return;
+
+                accelerationData.x.push(x);
+                accelerationData.y.push(y);
+                accelerationData.z.push(z);
+                accelerationData.time.push(time);
+
+                event.preventDefault();
+            }
+        }
+
+        function updateCharts() {
+            const chartsContainer = document.getElementById('charts-container');
+            chartsContainer.replaceChildren()
+
+            const totalDuration = chapters[chapters.length - 1] - chapters[0];
+            const chartCnt = Math.max(1, Math.round(totalDuration / 60));
+            const chartInterval = Math.ceil(totalDuration / chartCnt);
+
+            for (let i = 0; i < chartCnt; i++) {
+                const start = chapters[0] + i * chartInterval;
+                const end = chapters[0] + (i + 1) * chartInterval;
+                const dur = end - start;
+
+                const next_idx = _.findIndex(accelerationData.time, x => x > end);
+                const cnt = next_idx >= 0 ? next_idx : accelerationData.time.length;
+                const ts = accelerationData.time.splice(0, cnt);
+                const xs = accelerationData.x.splice(0, cnt);
+                const ys = accelerationData.y.splice(0, cnt);
+                const zs = accelerationData.z.splice(0, cnt);
+
+                const canvasEl = document.createElement('canvas');
+                canvasEl.className = 'acceleration-chart';
+                chartsContainer.appendChild(canvasEl);
+
+                const ctx = canvasEl.getContext('2d');
+                const chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: ts,
+                        datasets: [["X", xs, "red"], ["Y", ys, "blue"], ["Z", zs, "green"]].map(([label, data, color], index) => ({
+                            label,
+                            data,
+                            borderColor: color,
+                            pointRadius: 0,
+                            borderWidth: 1
+                        }))
+                    },
+                    options: {
+                        responsive: true,
+                        aspectRatio: 4,
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                min: start,
+                                max: end,
+                                display: false  // X軸のラベルを非表示
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                display: false  // 凡例を非表示
+                            },
+                            decimation: {
+                                enabled: true
+                            }
+                        }
+                    },
+                    plugins: [{
+                        beforeDraw: (chart) => {
+                            const ctx = chart.ctx;
+                            const chartArea = chart.chartArea;
+                            ctx.save();
+
+                            // チャプターごとの背景色
+                            chapters.forEach((st, i) => {
+                                const et = chapters[i + 1];
+                                if (!et) return;
+                                if (i % 2 === 1 && et >= start && st <= end) {
+                                    const left = Math.max(0, (st - start) * chartArea.width / dur);
+                                    const width = Math.min(chartArea.width - left, (et - st) * chartArea.width / dur);
+                                    ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+                                    ctx.fillRect(chartArea.left + left, chartArea.top, width, chartArea.height);
+                                }
+                            });
+
+                            ctx.restore();
+                        }
+                    }]
+                });
+            }
+        }
+
+        // イベントリスナーの設定
+        document.getElementById('start-recording').addEventListener('click', startMotionRecording);
+        document.getElementById('stop-recording').addEventListener('click', stopMotionRecording);
+    </script>
+</body>
+
+</html>
